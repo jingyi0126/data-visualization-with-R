@@ -1,0 +1,180 @@
+---
+title: "11_logistic_regression"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(ggplot2)
+library(data.table)
+library(magrittr)
+library(tidyr)
+library(dplyr)
+library(ggrepel)
+library(plotROC)
+```
+
+# Tutorial
+
+## Section 01 - Diabetes Dataset Analysis
+
+```{r}
+# Load data
+diabetes_dt <- fread("../data/pima-indians-diabetes.csv") %>% 
+  .[, Outcome := as.factor(Outcome)]
+
+# 1. Class balance
+cat("Class distribution:\n")
+diabetes_dt[, .(Count = .N, Proportion = .N/nrow(diabetes_dt)), by = Outcome]
+
+# 2. Feature visualization
+melted_dt <- melt(diabetes_dt[, .(Glucose, BloodPressure, Insulin, Outcome)], 
+                  id.vars = "Outcome")
+
+ggplot(melted_dt, aes(Outcome, value)) +
+  geom_boxplot() +
+  facet_wrap(~variable, scales = "free_y") +
+  labs(title = "Feature Distributions by Diabetes Outcome")
+
+# 3. Logistic regression with Glucose
+glucose_model <- glm(Outcome ~ Glucose, data = diabetes_dt, family = "binomial")
+summary(glucose_model)
+
+# Odds ratio interpretation
+glucose_coef <- coef(glucose_model)["Glucose"]
+odds_ratio <- exp(glucose_coef)
+cat("Odds ratio per 1 mg/dL glucose increase:", round(odds_ratio, 3), 
+    "(= +", round(100*(odds_ratio-1), 1), "%\n")
+
+# 4. Predictions and distribution
+diabetes_dt[, pred_glucose := predict(glucose_model, type = "response")]
+
+ggplot(diabetes_dt, aes(pred_glucose, fill = Outcome)) +
+  geom_histogram(alpha = 0.7, position = "identity", bins = 30) +
+  labs(title = "Prediction Distribution: Glucose Model")
+
+# 5. Confusion matrix function
+confusion_matrix <- function(dt, score_col, label_col, threshold) {
+  cm <- dt[, table(get(label_col), get(score_col) > threshold)]
+  colnames(cm) <- as.character(colnames(cm))
+  rownames(cm) <- as.character(rownames(cm))
+  # Ensure all expected levels are present
+ if (!"TRUE" %in% colnames(cm)) {
+    cm <- cbind(cm, "TRUE" = c("0" = 0, "1" = 0)[rownames(cm)])
+  }
+  if (!"FALSE" %in% colnames(cm)) {
+    cm <- cbind(cm, "FALSE" = c("0" = 0, "1" = 0)[rownames(cm)])
+  }
+  
+  # 补充缺失的行
+  if (!"1" %in% rownames(cm)) {
+    cm <- rbind(cm, "1" = c("FALSE" = 0, "TRUE" = 0)[colnames(cm)])
+  }
+  if (!"0" %in% rownames(cm)) {
+    cm <- rbind(cm, "0" = c("FALSE" = 0, "TRUE" = 0)[colnames(cm)])
+  }
+  
+cm <- cm[c("0", "1"), c("FALSE", "TRUE")]
+
+  return(cm)
+}
+thresholds <- c(-1, 0, 1)
+lapply(thresholds, function(t) {
+  cat("\nThreshold =", t, ":\n")
+  confusion_matrix(diabetes_dt, "pred_glucose", "Outcome", t)
+})
+
+# 6. TPR/FPR function and ROC points
+tpr_fpr <- function(dt, score_col, label_col, threshold) {
+  cm <- confusion_matrix(dt, score_col, label_col, threshold)
+  
+  # Extract values
+  TP <- cm["1", "TRUE"]
+  FP <- cm["0", "TRUE"]
+  TN <- cm["0", "FALSE"]
+  FN <- cm["1", "FALSE"]
+  
+  # Calculate metrics
+  tpr <- TP/(TP + FN)
+  fpr <- FP/(FP + TN)
+  
+  data.table(threshold = threshold, tpr = tpr, fpr = fpr)
+}
+
+roc_points <- rbindlist(lapply(thresholds, function(t) {
+  tpr_fpr(diabetes_dt, "pred_glucose", "Outcome", t)
+}))
+
+ggplot(roc_points, aes(fpr, tpr, label = threshold)) +
+  geom_point(size = 3) +
+  geom_text_repel() +
+  geom_abline(linetype = "dashed", color = "gray") +
+  coord_equal() +
+  labs(title = "ROC Points for Glucose Model")
+```
+
+
+```{r}
+# 1. Additional models
+bp_model <- glm(Outcome ~ BloodPressure, data = diabetes_dt, family = "binomial")
+insulin_model <- glm(Outcome ~ Insulin, data = diabetes_dt, family = "binomial")
+
+# Model summaries
+cat("\nBlood Pressure Model:\n")
+summary(bp_model)
+
+cat("\nInsulin Model:\n")
+summary(insulin_model)
+
+# 2. Store predictions
+diabetes_dt[, `:=`(
+  pred_bp = predict(bp_model, type = "response"),
+  pred_insulin = predict(insulin_model, type = "response")
+)]
+
+# Visualization
+pred_dt <- melt(diabetes_dt[, .(Outcome, pred_glucose, pred_bp, pred_insulin)], 
+                id.vars = "Outcome", variable.name = "model", value.name = "prediction")
+
+ggplot(pred_dt, aes(prediction, fill = Outcome)) +
+  geom_histogram(alpha = 0.7, position = "identity", bins = 30) +
+  facet_wrap(~model, scales = "free") +
+  labs(title = "Prediction Distributions by Model")
+
+# 3. ROC comparison
+roc_dt <- melt(diabetes_dt[, .(Outcome, pred_glucose, pred_bp, pred_insulin)],
+               id.vars = "Outcome", variable.name = "model", value.name = "score")
+
+ggplot(roc_dt, aes(d = as.numeric(as.character(Outcome)), m = score, color = model)) +
+  geom_roc(n.cuts = 0) +
+  geom_abline(linetype = "dashed", color = "gray") +
+  labs(title = "ROC Curve Comparison") +
+  theme_bw()
+
+# 4. Full model with all features
+feature_vars <- setdiff(names(diabetes_dt), c("Outcome", "pred_glucose", "pred_bp", "pred_insulin"))
+full_model <- glm(
+  reformulate(feature_vars, "Outcome"), 
+  data = diabetes_dt, 
+  family = "binomial"
+)
+
+summary(full_model)
+
+# Store predictions and add to ROC
+diabetes_dt[, pred_full := predict(full_model, type = "response")]
+roc_dt_full <- melt(diabetes_dt[, .(Outcome, pred_glucose, pred_bp, pred_insulin, pred_full)],
+                    id.vars = "Outcome", variable.name = "model", value.name = "score")
+
+ggplot(roc_dt_full, aes(d = as.numeric(as.character(Outcome)), m = score, color = model)) +
+  geom_roc(n.cuts = 0) +
+  geom_abline(linetype = "dashed", color = "gray") +
+  labs(title = "ROC Curves with Full Model") +
+  theme_bw()
+
+# Full model prediction distribution
+ggplot(diabetes_dt, aes(pred_full, fill = Outcome)) +
+  geom_histogram(alpha = 0.7, position = "identity", bins = 30) +
+  labs(title = "Full Model Prediction Distribution")
+```

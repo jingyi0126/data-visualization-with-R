@@ -1,0 +1,293 @@
+---
+title: "12_model_evaluation_and_tuning"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(ggplot2)
+library(data.table)
+library(magrittr)
+library(tidyr)
+library(dplyr)
+library(ggrepel)
+library(plotROC)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+```
+
+# Tutorial
+
+## Section 01 - Diabetes Dataset with Tree-based Models
+
+```{r}
+# Load data
+diabetes_dt <- fread("../data/pima-indians-diabetes.csv") %>% 
+  .[, Outcome := as.factor(Outcome)]
+feature_vars <- setdiff(names(diabetes_dt), "Outcome")
+full_formula <- as.formula(paste("Outcome ~", paste(feature_vars, collapse = "+")))
+
+# 1. Decision tree without train-test split
+dt_classifier <- rpart(
+  full_formula,
+  data = diabetes_dt,
+  control = rpart.control(minsplit = 3, cp = 0.001)
+)
+
+# Visualize tree
+rpart.plot(dt_classifier, main = "Decision Tree for Diabetes Prediction")
+
+# 2. ROC evaluation (overfitted model)
+diabetes_dt[, pred_dt := predict(dt_classifier, type = "prob")[,2]]
+
+ggplot(diabetes_dt, aes(d = as.numeric(as.character(Outcome)), m = pred_dt)) +
+  geom_roc(n.cuts = 0) +
+  geom_abline(linetype = "dashed", color = "gray") +
+  labs(title = "ROC Curve - Decision Tree (No Split)",
+       subtitle = "Perfect performance indicates overfitting")
+
+# 3. Train-test split evaluation
+set.seed(13)
+train_ind <- sample(1:nrow(diabetes_dt), size = floor(0.7 * nrow(diabetes_dt)))
+
+# Train decision tree
+dt_classifier_tt <- rpart(
+  full_formula,
+  data = diabetes_dt[train_ind],
+  control = rpart.control(minsplit = 3, cp = 0.001)
+)
+
+# Predictions
+diabetes_dt[, pred_dt_tt := predict(dt_classifier_tt, newdata = diabetes_dt, type = "prob")[,2]]
+diabetes_dt[, dataset := ifelse(.I %in% train_ind, "train", "test")]
+
+# ROC comparison
+ggplot(diabetes_dt, aes(d = as.numeric(as.character(Outcome)), m = pred_dt_tt, color = dataset)) +
+  geom_roc(n.cuts = 0) +
+  geom_abline(linetype = "dashed", color = "gray") +
+  labs(title = "ROC Curves - Decision Tree (Train-Test Split)",
+       subtitle = "Poor test performance indicates overfitting")
+
+# 4. Random forest model
+rf_model <- randomForest(
+  full_formula,
+  data = diabetes_dt[train_ind],
+  ntree = 200,
+  nodesize = 20,
+  maxnodes = 7,
+  mtry = 5
+)
+
+# Predictions
+diabetes_dt[, pred_rf := predict(rf_model, newdata = diabetes_dt, type = "prob")[,2]]
+
+# ROC comparison
+ggplot(diabetes_dt, aes(d = as.numeric(as.character(Outcome)), m = pred_rf, color = dataset)) +
+  geom_roc(n.cuts = 0) +
+  geom_abline(linetype = "dashed", color = "gray") +
+  labs(title = "ROC Curves - Random Forest",
+       subtitle = "Better generalization than decision tree")
+
+# 5. Optional: Compare with logistic regression
+logreg_model <- glm(
+  full_formula,
+  data = diabetes_dt[train_ind],
+  family = "binomial"
+)
+
+diabetes_dt[, pred_logreg := predict(logreg_model, newdata = diabetes_dt, type = "response")]
+
+# Combined ROC plot
+roc_dt <- melt(diabetes_dt, 
+               measure.vars = c("pred_rf", "pred_logreg"),
+               variable.name = "model", 
+               value.name = "score")
+
+ggplot(roc_dt, aes(d = as.numeric(as.character(Outcome)), m = score, color = interaction(model, dataset))) +
+  geom_roc(n.cuts = 0) +
+  labs(title = "Model Comparison: Random Forest vs Logistic Regression")
+```
+## Section 03 - Cross Validation
+
+```{r}
+# 1. 5-fold CV for logistic regression
+diabetes_dt[, Outcome_bool := ifelse(Outcome == 1, "yes", "no")]
+
+fitControl <- trainControl(
+  method = "cv",
+  number = 5,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary
+)
+
+bool_formula <- as.formula(paste("Outcome_bool ~", paste(feature_vars, collapse = "+")))
+logreg_cv <- train(
+  bool_formula,
+  data = diabetes_dt,
+  method = "glm",
+  family = "binomial",
+  trControl = fitControl,
+  metric = "ROC"
+)
+
+# Results
+cat("5-fold CV results:\n")
+print(logreg_cv)
+
+# 2. Best performing fold
+cv_metrics <- as.data.table(logreg_cv$resample)
+best_fold <- cv_metrics[order(-ROC)][1]
+cat("\nBest fold:", best_fold$Resample, "with AUC =", round(best_fold$ROC, 3), "\n")
+
+# 3. Sensitivity/specificity boxplot
+metrics_melt <- melt(cv_metrics, id.vars = "Resample", 
+                     measure.vars = c("Sens", "Spec"),
+                     variable.name = "metric")
+
+ggplot(metrics_melt, aes(metric, value)) +
+  geom_boxplot() +
+  geom_jitter(width = 0.1, size = 2) +
+  labs(title = "Cross-Validation Metrics",
+       y = "Value", x = "Metric")
+
+# 4. Optional: Varying k in CV
+k_values <- c(2, 20, 100)
+results <- list()
+
+for (k in k_values) {
+  fitControl_k <- trainControl(
+    method = "cv",
+    number = k,
+    classProbs = TRUE,
+    summaryFunction = twoClassSummary
+  )
+  
+  logreg_cv_k <- train(
+    bool_formula,
+    data = diabetes_dt,
+    method = "glm",
+    family = "binomial",
+    trControl = fitControl_k,
+    metric = "ROC"
+  )
+  
+  results[[paste0("k", k)]] <- data.table(
+    k = k,
+    AUC = mean(logreg_cv_k$resample$ROC)
+  )
+}
+
+results_dt <- rbindlist(results)
+
+ggplot(results_dt, aes(factor(k), AUC)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(title = "AUC Across Different k Values",
+       x = "Number of Folds (k)", y = "Mean AUC")
+```
+## Section 04 - Hyperparameter Tuning (Optional)
+
+```{r}
+# 1. Grid search for random forest
+train_data <- diabetes_dt[train_ind]
+test_data <- diabetes_dt[-train_ind]
+
+# Define parameter grid
+param_grid <- expand.grid(
+  mtry = c(4, 5, 10),
+  nodesize = c(10, 20, 30),
+  ntree = c(100, 150, 200)
+)
+
+# Initialize results
+results <- list()
+
+for (i in 1:nrow(param_grid)) {
+  params <- param_grid[i, ]
+  
+  rf_model <- randomForest(
+    full_formula,
+    data = train_data,
+    ntree = params$ntree,
+    nodesize = params$nodesize,
+    maxnodes = 7,
+    mtry = params$mtry
+  )
+  
+  test_data[, pred := predict(rf_model, newdata = test_data, type = "prob")[,2]]
+  roc_plot <- ggplot(test_data, aes(d = as.numeric(as.character(Outcome)), m = pred)) +
+    geom_roc(n.cuts = 0)
+  auc_val <- calc_auc(roc_plot)$AUC
+  
+  results[[i]] <- data.table(
+    mtry = params$mtry,
+    nodesize = params$nodesize,
+    ntree = params$ntree,
+    AUC = auc_val
+  )
+}
+
+results_dt <- rbindlist(results)
+
+# Plot AUC across hyperparameters
+ggplot(results_dt, aes(factor(ntree), AUC, fill = factor(mtry))) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~nodesize) +
+  labs(title = "Hyperparameter Tuning Results",
+       x = "Number of Trees (ntree)",
+       y = "AUC",
+       fill = "mtry") +
+  theme_minimal()
+```
+## Section 05 - Feature Importance (Optional)
+
+```{r}
+# Feature importance via AUC drop
+base_rf <- randomForest(
+  full_formula,
+  data = diabetes_dt[train_ind],
+  ntree = 200,
+  nodesize = 20,
+  maxnodes = 7,
+  mtry = 5
+)
+
+test_data[, pred_base := predict(base_rf, newdata = test_data, type = "prob")[,2]]
+base_roc <- ggplot(test_data, aes(d = as.numeric(as.character(Outcome)), m = pred_base)) +
+  geom_roc(n.cuts = 0)
+base_auc <- calc_auc(base_roc)$AUC
+
+importance_dt <- data.table()
+for (feat in feature_vars) {
+  reduced_formula <- as.formula(paste("Outcome ~", paste(setdiff(feature_vars, feat), collapse = "+")))
+  
+  rf_reduced <- randomForest(
+    reduced_formula,
+    data = diabetes_dt[train_ind],
+    ntree = 200,
+    nodesize = 20,
+    maxnodes = 7,
+    mtry = 5
+  )
+  
+  test_data[, pred_reduced := predict(rf_reduced, newdata = test_data, type = "prob")[,2]]
+  reduced_roc <- ggplot(test_data, aes(d = as.numeric(as.character(Outcome)), m = pred_reduced)) +
+    geom_roc(n.cuts = 0)
+  reduced_auc <- calc_auc(reduced_roc)$AUC
+  
+  importance_dt <- rbind(importance_dt, data.table(
+    Feature = feat,
+    AUC_drop = base_auc - reduced_auc
+  ))
+}
+
+# Plot feature importance
+ggplot(importance_dt, aes(reorder(Feature, AUC_drop), AUC_drop)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Feature Importance (AUC Decrease)",
+       x = "Feature", y = "AUC Decrease when Removed") +
+  theme_minimal()
+```

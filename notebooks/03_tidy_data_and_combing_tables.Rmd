@@ -1,0 +1,166 @@
+---
+title: "03_tidy_data_and_combing_tables"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 8,
+  fig.height = 6,
+  cache = TRUE
+)
+library(tidyverse)
+library(dslabs)
+library(knitr)
+library(kableExtra)
+library(scales)
+```
+
+# Introduction
+
+This report provides a complete analysis workflow using the murders dataset from the dslabs package.
+
+## Data Loading and Preparation
+
+```{r}
+data("murders")
+
+# Calculate murder rate per 100,000
+murders <- murders %>%
+  mutate(
+    rate = total / population * 100000,
+    rate_rounded = round(rate, 1),
+    safety_level = case_when(
+      rate < 2 ~ "Very Safe",
+      rate < 4 ~ "Safe",
+      rate < 6 ~ "Moderate",
+      TRUE ~ "High Risk"
+    )
+  )
+```
+
+## Exploratory Analysis
+
+### Basic Statistics
+
+```{r}
+murders %>%
+  select(population, total, rate) %>%
+  summary() %>%
+  kable(caption = "Summary Statistics") %>%
+  kable_styling(bootstrap_options = "striped")
+```
+
+### Regional Analysis
+
+```{r}
+regional_stats <- murders %>%
+  group_by(region) %>%
+  summarise(
+    avg_rate = mean(rate),
+    median_rate = median(rate),
+    min_rate = min(rate),
+    max_rate = max(rate),
+    total_murders = sum(total),
+    .groups = "drop"
+  )
+
+regional_stats %>%
+  kable(caption = "Regional Statistics") %>%
+  kable_styling(bootstrap_options = "striped")
+```
+
+## Visualization
+
+### Murder Rate Distribution
+
+```{r}
+ggplot(murders, aes(x = rate)) +
+  geom_histogram(binwidth = 0.5, fill = "steelblue", color = "white") +
+  labs(title = "Distribution of Murder Rates",
+       x = "Murders per 100,000",
+       y = "Number of States") +
+  theme_minimal()
+```
+
+### Regional Comparison
+
+```{r}
+ggplot(murders, aes(x = region, y = rate, fill = region)) +
+  geom_boxplot() +
+  labs(title = "Murder Rates by Region",
+       x = "Region",
+       y = "Murders per 100,000") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+### Top and Bottom States
+
+```{r}
+# Generate top_states and bottom_states
+top_states <- murders %>%
+  arrange(desc(rate)) %>%
+  select(state, region, rate) %>%
+  head(5)
+
+bottom_states <- murders %>%
+  arrange(rate) %>%
+  select(state, region, rate) %>%
+  head(5)
+
+# Combine top_states and bottom_states into a single data frame with an additional column
+extreme_states <- bind_rows(
+  top_states %>% mutate(Category = "Highest Murder Rates"),
+  bottom_states %>% mutate(Category = "Lowest Murder Rates")
+)
+
+# Create a table using kable
+extreme_states %>%
+  kable(caption = "Extreme States by Murder Rate") %>%
+  kable_styling(bootstrap_options = "striped")
+```
+
+### Population vs Murder Rate
+
+```{r}
+ggplot(murders, aes(x = population/1000000, y = rate)) +
+  geom_point(aes(color = region), size = 3) +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_x_continuous(labels = comma) +
+  labs(title = "Population vs Murder Rate",
+       x = "Population (millions)",
+       y = "Murders per 100,000",
+       color = "Region") +
+  theme_minimal()
+```
+
+### Safety Level Analysis
+
+```{r}
+safety_summary <- murders %>%
+  count(safety_level) %>%
+  mutate(percentage = n / sum(n) * 100)
+
+ggplot(safety_summary, aes(x = safety_level, y = n, fill = safety_level)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(round(percentage, 1), "%")), vjust = -0.5) +
+  labs(title = "States by Safety Level",
+       x = "Safety Level",
+       y = "Number of States") +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+## Conclusion
+
+This analysis reveals patterns in murder rates across U.S. states, with notable regional differences. The South has the highest average murder rates while the Northeast has the lowest.
+
+```{r}
+sessionInfo()
+```
+

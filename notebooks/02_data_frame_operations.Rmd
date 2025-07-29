@@ -1,0 +1,264 @@
+---
+title: "02_Data_Frame_Operations_and_dplyr_Basics"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+# Data Frame Operations and dplyr Basics
+
+This notebook demonstrates basic data frame operations, filtering, sorting, and summarizing data using the dplyr package with the murders dataset.
+
+```{r load-packages, include=FALSE}
+# Load required packages for data manipulation and visualization
+library(dslabs)
+library(tidyverse)
+library(dplyr)
+```
+
+## Working with Data Frames
+
+### Loading and Exploring the Dataset
+
+```{r load-explore-data}
+# Load the murders dataset
+data("murders")
+
+# Examine the structure of the data
+str(murders)
+
+# Display the first few rows
+head(murders)
+
+# Check dimensions
+dim(murders)
+```
+
+### Basic Data Frame Operations
+
+```{r basic-operations}
+# Access specific columns
+murders$state
+murders$population
+
+# Use column names to access data
+murders[["state"]]
+
+# Display column names
+names(murders)
+```
+
+## Data Filtering and Selection
+
+### Using Base R for Filtering
+
+```{r base-r-filtering}
+# Find states with population less than 1 million
+small_states <- murders$state[murders$population < 1000000]
+small_states
+
+# Find states in the South region
+south_states <- murders$state[murders$region == "South"]
+head(south_states)
+```
+
+### Using dplyr for Data Manipulation
+
+```{r dplyr-filtering}
+# Filter states with population less than 1 million
+murders %>% 
+  filter(population < 1000000) %>% 
+  select(state, population)
+
+# Filter states in the South region
+murders %>% 
+  filter(region == "South") %>% 
+  select(state, region, population)
+```
+
+### Multiple Conditions
+
+```{r multiple-conditions}
+# Filter states in the South with population > 5 million
+murders %>% 
+  filter(region == "South" & population > 5000000) %>% 
+  select(state, region, population, total)
+
+# Filter states with either very high or very low murder rates
+murders %>% 
+  mutate(rate = total / population * 100000) %>% 
+  filter(rate > 10 | rate < 1) %>% 
+  select(state, region, rate) %>% 
+  arrange(rate)
+```
+
+## Data Sorting and Ranking
+
+### Sorting Data
+
+```{r sorting-data}
+# Sort by population (ascending)
+murders %>% 
+  arrange(population) %>% 
+  select(state, population) %>% 
+  head()
+
+# Sort by population (descending)
+murders %>% 
+  arrange(desc(population)) %>% 
+  select(state, population) %>% 
+  head()
+```
+
+### Creating New Variables
+
+```{r new-variables}
+# Add murder rate per 100,000 population
+murders <- murders %>% 
+  mutate(rate = total / population * 100000)
+
+# Display states with highest murder rates
+murders %>% 
+  arrange(desc(rate)) %>% 
+  select(state, region, rate) %>% 
+  head(10)
+```
+
+## Data Summarization
+
+### Summary Statistics by Region
+
+```{r region-summaries}
+# Calculate summary statistics by region
+murders %>% 
+  group_by(region) %>% 
+  summarise(
+    total_population = sum(population),
+    total_murders = sum(total),
+    avg_rate = mean(rate),
+    median_rate = median(rate),
+    states_count = n()
+  )
+```
+
+### Finding Extremes
+
+```{r extremes}
+# State with highest murder rate
+murders %>% 
+  filter(rate == max(rate)) %>% 
+  select(state, region, rate)
+
+# State with lowest murder rate
+murders %>% 
+  filter(rate == min(rate)) %>% 
+  select(state, region, rate)
+
+# Top 5 safest states (lowest murder rates)
+murders %>% 
+  arrange(rate) %>% 
+  select(state, region, rate) %>% 
+  head(5)
+```
+
+## Advanced Operations
+
+### Conditional Logic
+
+```{r conditional-logic}
+# Categorize states based on murder rate
+murders <- murders %>% 
+  mutate(
+    safety_level = case_when(
+      rate < 2 ~ "Very Safe",
+      rate < 4 ~ "Safe", 
+      rate < 6 ~ "Moderate",
+      TRUE ~ "High Risk"
+    )
+  )
+
+# Count states in each safety category
+murders %>% 
+  count(safety_level, sort = TRUE)
+```
+
+### Working with Text Data
+
+```{r text-operations}
+# Find states with "New" in the name
+murders %>% 
+  filter(str_detect(state, "New")) %>% 
+  select(state, region, rate)
+
+# States with names longer than 10 characters
+murders %>% 
+  filter(str_length(state) > 10) %>% 
+  select(state, region) %>% 
+  arrange(state)
+```
+
+### Data Validation
+
+```{r data-validation}
+# Check for missing values
+murders %>% 
+  summarise_all(~sum(is.na(.)))
+
+# Check data ranges
+murders %>% 
+  summarise(
+    min_pop = min(population),
+    max_pop = max(population),
+    min_total = min(total),
+    max_total = max(total),
+    min_rate = min(rate),
+    max_rate = max(rate)
+  )
+```
+
+## Regional Analysis
+
+### Comparing Regions
+
+```{r regional-comparison}
+# Create a comprehensive regional summary
+regional_analysis <- murders %>% 
+  group_by(region) %>% 
+  summarise(
+    states_count = n(),
+    total_population = sum(population),
+    total_murders = sum(total),
+    avg_rate = mean(rate),
+    median_rate = median(rate),
+    min_rate = min(rate),
+    max_rate = max(rate),
+    .groups = 'drop'
+  ) %>% 
+  arrange(desc(avg_rate))
+
+regional_analysis
+```
+
+### Top States by Region
+
+```{r top-states-by-region}
+# Find the state with highest murder rate in each region
+murders %>% 
+  group_by(region) %>% 
+  filter(rate == max(rate)) %>% 
+  select(region, state, rate) %>% 
+  arrange(desc(rate))
+```
+
+## Summary
+
+This notebook covered essential data frame operations including:
+
+1. **Basic data exploration**: structure, dimensions, and column access
+2. **Filtering data**: using conditions to subset data
+3. **Sorting and arranging**: ordering data by different criteria  
+4. **Creating new variables**: calculating derived metrics like murder rates
+5. **Data summarization**: computing statistics by groups
+6. **Advanced operations**: conditional logic, text manipulation, and data validation
+7. **Regional analysis**: comparing different geographical regions
+
+These operations form the foundation of data analysis and are essential for exploratory data analysis (EDA) and data preprocessing.

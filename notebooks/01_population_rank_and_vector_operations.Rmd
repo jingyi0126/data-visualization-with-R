@@ -1,0 +1,148 @@
+---
+title: "01_population_rank_and_vector_operations"
+output: html_document
+---
+
+# Population Rank and Vector Operations
+
+This notebook demonstrates basic vector operations, ranking, and data manipulation using the murders dataset from the dslabs package.
+
+```{r load-packages, include=FALSE}
+# Load required packages for data manipulation and visualization
+library(dslabs)
+library(tidyverse)
+```
+
+## Working with Population Data
+
+### Loading and Exploring the Murders Dataset
+
+```{r load-data}
+# Load the murders dataset from dslabs package
+data("murders")
+
+# Extract population data and sort it
+pop <- murders$population
+pop <- sort(pop)
+
+# Display the smallest population value
+pop[1]
+```
+
+### Finding Minimum Values
+
+```{r find-minimum}
+# Alternative way to find the minimum population
+min(pop)  # Same result as pop[1]
+```
+
+### Finding Index Positions
+
+```{r find-indices}
+# Get population data (unsorted)
+pop <- murders$population
+
+# Find indices that would sort the population in ascending order
+smallest_idx <- order(pop)
+smallest_idx[1]  # Index of the state with smallest population
+
+# Get the actual smallest population value using the index
+pop[smallest_idx[1]]
+```
+
+### Direct Methods for Finding Minimum
+
+```{r direct-minimum}
+# Find the index of the minimum population directly
+which.min(murders$population)
+
+# Find the state with the minimum population
+murders$state[which.min(murders$population)]
+```
+
+## Ranking Data
+
+### Creating Population Rankings
+
+```{r population-rankings}
+# Create ranks for all states based on population
+ranks <- rank(murders$population)
+
+# Create a data frame with state names and their population ranks
+my_df <- data.frame(state = murders$state, rank = ranks)
+
+# Display the first few rows
+head(my_df)
+```
+
+## Working with Named Vectors
+
+### Temperature Conversion Example
+
+```{r temperature-conversion}
+# Create temperature data in Celsius for different cities
+temp <- c(35, 88, 42, 84, 81, 30)
+city <- c("Beijing", "Lagos", "Paris", "Rio de Janeiro", "San Juan", "Toronto")
+
+# Assign city names to temperature values
+names(temp) <- city
+
+# Convert Celsius to Fahrenheit using the conversion formula
+temp_F <- 5/9 * (temp - 32)
+temp_F
+```
+
+## Handling Missing Values (NA)
+
+### Working with NA Values
+
+```{r handle-na}
+# Load example data with missing values
+data("na_example")
+
+# Examine the structure of the data
+str(na_example)
+```
+
+### Calculating Mean with NA Values
+
+```{r mean-with-na}
+# This will return NA because there are missing values
+mean(na_example)  # Returns NA
+```
+
+### Identifying Missing Values
+
+```{r identify-na}
+# Create a logical vector indicating which values are NA
+ind <- is.na(na_example)
+
+# Count the number of missing and non-missing values
+table(ind)
+
+# Alternative ways to count NA values:
+sum(ind)                    # Number of NA values
+length(na_example[ind])     # Same as above
+```
+
+### Computing Statistics While Excluding NA
+
+```{r exclude-na}
+# Method 1: Use na.rm parameter to exclude NA values
+mean(na_example, na.rm = TRUE)
+
+# Method 2: Manually exclude NA values using logical indexing
+mean(na_example[!ind])
+```
+
+## Summary
+
+This notebook covered:
+
+1. **Vector operations**: sorting, finding minimum values, and indexing
+2. **Ranking data**: using the `rank()` function to create rankings
+3. **Named vectors**: assigning names to vector elements
+4. **Missing value handling**: identifying and working with NA values in calculations
+
+These are fundamental operations when working with data in R, especially for data cleaning and exploratory data analysis.
+

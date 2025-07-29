@@ -1,0 +1,164 @@
+---
+title: "07_statistical_testing_1"
+output: html_document
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 8,
+  fig.height = 6,
+  cache = TRUE
+)
+library(ggplot2)
+library(data.table)
+library(magrittr)
+library(tidyr)
+library(dplyr)
+library(patchwork)  # For combining plots
+```
+
+# Tutorial Exercises
+
+## Section 01: Permutation Test of Growth Rate Difference
+
+### 1. Load and Prepare Data
+
+```{r}
+# Load yeast data
+genotype <- fread("../data/eqtl/genotype.txt")
+growth <- fread("../data/eqtl/growth.txt")
+
+# Melt data to long format
+genotype_long <- melt(genotype, id.vars = "strain", 
+                      variable.name = "marker", value.name = "genotype")
+growth_long <- melt(growth, id.vars = "strain", 
+                    variable.name = "media", value.name = "growth_rate")
+```
+
+### 2. Define Helper Functions
+
+```{r}
+# Function to get maltose growth data for a specific marker
+getMaltoseDt <- function(mrk) {
+  growth_mrk <- merge(
+    growth_long,
+    genotype_long[marker %in% mrk, .(strain, genotype, marker)],
+    by = "strain",
+    allow.cartesian = TRUE
+  )
+  growth_mrk[media == "YPMalt"]
+}
+
+# Function to plot growth rates
+plot_growth_one_mk <- function(mk) {
+  ggplot(getMaltoseDt(mk), aes(genotype, growth_rate)) +
+    geom_boxplot(fill = "lightblue") +
+    labs(title = mk, x = "Genotype", y = "Growth Rate") +
+    theme_minimal()
+}
+
+# Function to calculate median difference
+median_diff <- function(dt) {
+  dt[genotype == 'Wild isolate', median(growth_rate, na.rm = TRUE)] -
+    dt[genotype == 'Lab strain', median(growth_rate, na.rm = TRUE)]
+}
+
+# Function to perform permutation test
+permutation_test <- function(dt, N_permu = 1000) {
+  T_ref <- median_diff(dt)
+  
+  # Perform permutations
+  T_star <- sapply(1:N_permu, function(x) {
+    perm_dt <- copy(dt)
+    perm_dt[, genotype := sample(genotype)]
+    median_diff(perm_dt)
+  })
+  
+  # Plot results
+  g <- ggplot(data.table(T_star), aes(T_star)) +
+    geom_histogram(bins = 30, fill = "lightblue", color = "black") +
+    geom_vline(aes(xintercept = T_ref), color = "red", size = 1) +
+    labs(title = "Permutation Test Results", 
+         x = "Median Difference", y = "Count") +
+    theme_minimal()
+  
+  # Compute p-value (two-sided)
+  p_val_right <- (sum(T_star >= abs(T_ref)) + 1) / (N_permu + 1)
+  p_val_left <- (sum(T_star <= -abs(T_ref)) + 1) / (N_permu + 1)
+  p_val <- 2 * min(p_val_left, p_val_right)
+  
+  list(plot = g, p_value = p_val)
+}
+```
+
+### 3. Analyze Marker 5211
+
+```{r}
+# Plot growth rates
+plot_growth_one_mk("mrk_5211")
+
+# Perform permutation test
+result_5211 <- permutation_test(getMaltoseDt("mrk_5211"))
+result_5211$plot
+cat("P-value for mrk_5211:", result_5211$p_value)
+```
+
+### 4. Analyze Other Markers
+
+```{r}
+# Marker 1653
+plot_growth_one_mk("mrk_1653")
+result_1653 <- permutation_test(getMaltoseDt("mrk_1653"))
+result_1653$plot
+cat("P-value for mrk_1653:", result_1653$p_value)
+
+# Marker 5091
+plot_growth_one_mk("mrk_5091")
+result_5091 <- permutation_test(getMaltoseDt("mrk_5091"))
+result_5091$plot
+cat("P-value for mrk_5091:", result_5091$p_value)
+```
+
+## Section 02: Permutation Test of Marker Association
+
+### 1. Test Marker Association
+
+```{r}
+# Prepare genotype data for markers 5091 and 5211
+mks_geno <- dcast(
+  genotype_long[marker %in% c("mrk_5091", "mrk_5211")], 
+  strain ~ marker, 
+  value.var = "genotype"
+)
+
+# Calculate agreement proportion
+agreement_prop <- function(dt) {
+  dt[, mean(mrk_5091 == mrk_5211, na.rm = TRUE)]
+}
+
+# Perform permutation test
+T_ref <- agreement_prop(mks_geno)
+N_permu <- 1000
+T_star <- replicate(N_permu, {
+  perm_dt <- copy(mks_geno)
+  perm_dt[, mrk_5211 := sample(mrk_5211)]
+  agreement_prop(perm_dt)
+})
+
+# Plot results
+ggplot(data.table(T_star), aes(T_star)) +
+  geom_histogram(bins = 30, fill = "lightgreen", color = "black") +
+  geom_vline(aes(xintercept = T_ref), color = "red", size = 1) +
+  labs(title = "Marker Association Test", 
+       x = "Agreement Proportion", y = "Count") +
+  theme_minimal()
+
+# Calculate p-value
+p_val <- (sum(T_star >= T_ref) + 1) / (N_permu + 1)
+cat("P-value for marker association:", p_val)
+```
+

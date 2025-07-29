@@ -1,0 +1,229 @@
+---
+title: "10_linear_regression"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(ggplot2)
+library(data.table)
+library(magrittr)
+library(tidyr)
+library(dplyr)
+library(patchwork)
+```
+
+# Tutorial
+
+## Section 01 - Predicting Heights
+
+```{r}
+# Load data
+heights <- fread("../data/height.csv") %>% 
+  na.omit() %>% 
+  .[, sex := as.factor(toupper(sex))] %>% 
+  .[sex == "W", sex := "F"]
+
+# 1. Linear model with sex and parents' heights
+model <- lm(height ~ sex + mother + father, data = heights)
+summary(model)
+
+# 2. Residual diagnostics
+pred_df <- data.table(
+  prediction = predict(model),
+  residuals = residuals(model)
+)
+
+# Residuals vs predicted
+ggplot(pred_df, aes(prediction, residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = "red") +
+  labs(title = "Residuals vs Predicted")
+
+# QQ plot of residuals
+ggplot(pred_df, aes(sample = residuals)) +
+  geom_qq() +
+  geom_qq_line() +
+  labs(title = "QQ Plot of Residuals")
+```
+
+## Section 02 - Iris Dataset Analysis
+
+```{r}
+# Load data
+data(iris)
+
+# 1. Three linear models
+# Base model (same slope/intercept for all species)
+base_model <- lm(Sepal.Width ~ Sepal.Length, data = iris)
+
+# Different intercepts per species
+intercept_model <- lm(Sepal.Width ~ Sepal.Length + Species, data = iris)
+
+# Different slopes and intercepts
+slope_intercept_model <- lm(Sepal.Width ~ Sepal.Length * Species, data = iris)
+
+# 2. Model coefficients
+summary(slope_intercept_model)
+
+# Extract slopes and intercepts
+species_coef <- data.table(
+  Species = c("setosa", "versicolor", "virginica"),
+  Intercept = c(
+    coef(slope_intercept_model)["(Intercept)"],
+    coef(slope_intercept_model)["(Intercept)"] + coef(slope_intercept_model)["Speciesversicolor"],
+    coef(slope_intercept_model)["(Intercept)"] + coef(slope_intercept_model)["Speciesvirginica"]
+  ),
+  Slope = c(
+    coef(slope_intercept_model)["Sepal.Length"],
+    coef(slope_intercept_model)["Sepal.Length"] + coef(slope_intercept_model)["Sepal.Length:Speciesversicolor"],
+    coef(slope_intercept_model)["Sepal.Length"] + coef(slope_intercept_model)["Sepal.Length:Speciesvirginica"]
+  )
+)
+
+# 3. Visualization with predictions
+iris_pred <- as.data.table(copy(iris))
+iris_pred[, base_pred := predict(base_model)]
+iris_pred[, intercept_pred := predict(intercept_model)]
+iris_pred[, slope_intercept_pred := predict(slope_intercept_model)]
+
+# Plot base model
+ggplot(iris_pred, aes(Sepal.Length, Sepal.Width, color = Species)) +
+  geom_point() +
+  geom_line(aes(y = base_pred), linewidth = 1) +
+  facet_wrap(~Species) +
+  labs(title = "Base Model (Same Slope/Intercept)")
+
+# Plot intercept model
+ggplot(iris_pred, aes(Sepal.Length, Sepal.Width, color = Species)) +
+  geom_point() +
+  geom_line(aes(y = intercept_pred), linewidth = 1) +
+  facet_wrap(~Species) +
+  labs(title = "Different Intercepts per Species")
+
+# Plot slope-intercept model
+ggplot(iris_pred, aes(Sepal.Length, Sepal.Width, color = Species)) +
+  geom_point() +
+  geom_line(aes(y = slope_intercept_pred), linewidth = 1) +
+  facet_wrap(~Species) +
+  labs(title = "Different Slopes and Intercepts per Species")
+
+# 4. Model comparison
+cat("Base vs Intercept Model:\n")
+anova(base_model, intercept_model)
+
+cat("\nIntercept vs Slope-Intercept Model:\n")
+anova(intercept_model, slope_intercept_model)
+```
+
+## Section 03 - Diabetes Dataset Analysis
+
+```{r}
+# Load data
+diabetes_dt <- fread("../data/diabetes.csv") %>% 
+  na.omit()
+
+# 1. Linear model
+glucose_model <- lm(Glucose ~ ., data = diabetes_dt)
+summary(glucose_model)
+
+# 2. Residual diagnostics
+pred_df_diabetes <- data.table(
+  prediction = predict(glucose_model),
+  residuals = residuals(glucose_model)
+)
+
+# Residuals vs predicted
+ggplot(pred_df_diabetes, aes(prediction, residuals)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = "red") +
+  labs(title = "Residuals vs Predicted (Glucose Model)")
+
+# QQ plot of residuals
+ggplot(pred_df_diabetes, aes(sample = residuals)) +
+  geom_qq() +
+  geom_qq_line() +
+  labs(title = "QQ Plot of Residuals (Glucose Model)")
+```
+
+# Section 04 - Model Evaluation
+
+```{r}
+# 1. Calibration plot function
+calibration_plot <- function(dt, model_col, label_col, ...) {
+  ggplot(dt, aes_string(x = model_col, y = label_col)) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "loess", ...) +
+    labs(x = "Predicted Probability", y = "Observed Proportion") +
+    theme_minimal()
+}
+
+# 2. Calibration plot for the glucose model
+calibration_plot(diabetes_dt, "pred_glucose", "Outcome", span = 0.3)
+
+# 3. Brier score function
+brier_score <- function(dt, score_col, label_col) {
+  mean((dt[[score_col]] - dt[[label_col]])^2)
+}
+
+# Brier score for the glucose model
+cat("Brier Score (Glucose Model):", brier_score(diabetes_dt, "pred_glucose", "Outcome"), "\n")
+
+# 4. Logarithmic loss function
+log_loss <- function(dt, score_col, label_col) {
+  -mean(dt[[label_col]] * log(dt[[score_col]]) + (1 - dt[[label_col]]) * log(1 - dt[[score_col]]))
+}
+
+# Logarithmic loss for the glucose model
+cat("Logarithmic Loss (Glucose Model):", log_loss(diabetes_dt, "pred_glucose", "Outcome"), "\n")
+
+# 5. Confusion matrix function
+confusion_matrix <- function(dt, score_col, label_col, threshold) {
+  cm <- dt[, table(get(label_col), get(score_col) > threshold)]
+  
+  # Ensure all expected levels are present
+  if (!"TRUE" %in% colnames(cm)) {
+    cm <- cbind(cm, TRUE = 0)
+  }
+  if (!"FALSE" %in% colnames(cm)) {
+    cm <- cbind(cm, FALSE = 0)
+  }
+  if (!"1" %in% rownames(cm)) {
+    cm <- rbind(cm, `1` = c(TRUE = 0, FALSE = 0))
+  }
+  if (!"0" %in% rownames(cm)) {
+    cm <- rbind(cm, `0` = c(TRUE = 0, FALSE = 0))
+  }
+  
+  cm
+}
+
+# 6. TPR/FPR function and ROC points
+tpr_fpr <- function(dt, score_col, label_col, threshold) {
+  cm <- confusion_matrix(dt, score_col, label_col, threshold)
+  
+  # Extract values
+  TP <- cm["1", "TRUE"]
+  FP <- cm["0", "TRUE"]
+  TN <- cm["0", "FALSE"]
+  FN <- cm["1", "FALSE"]
+  
+  # Calculate metrics
+  tpr <- TP/(TP + FN)
+  fpr <- FP/(FP + TN)
+  
+  data.table(threshold = threshold, tpr = tpr, fpr = fpr)
+}
+
+thresholds <- seq(0, 1, by = 0.01)
+roc_points <- rbindlist(lapply(thresholds, function(t) {
+  tpr_fpr(diabetes_dt, "pred_glucose", "Outcome", t)
+}))
+
+ggplot(roc_points, aes(fpr, tpr, label = threshold)) +
+  geom_point(size = 3) +
+  geom_text_repel() +
+  geom_abline(linetype = "dashed", color = "gray") +
+  coord_equal() +
+  labs(title = "ROC Points for Glucose Model")
+```

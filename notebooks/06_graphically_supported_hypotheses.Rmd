@@ -1,0 +1,295 @@
+---
+title: "06_graphically_supported_hypotheses"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 8,
+  fig.height = 6,
+  cache = TRUE
+)
+library(ggplot2)
+library(data.table)
+library(magrittr)
+library(tidyr)
+library(cowplot)
+```
+
+# Tutorial Exercises
+
+## Section 01: Color Guidelines
+
+Best practices when using color for data visualizations:
+
+- Avoid having too many colors for categorical data
+- Use color only when it actually adds meaning to the plot
+
+## Section 02: Correlation and Causation
+
+```{r}
+# 1. Reverse causality: False - Correlation doesn't imply direction
+# 2. If A causes B and C: False - B and C may correlate but not cause each other
+# 3. If A precedes B: False - Temporal precedence ≠ causation
+# 4. Causation implies association: True - But not necessarily linear
+```
+
+## Section 03: Effect of a Third Variable
+
+### 1. Coffee and Datavizitis Association
+
+```{r}
+coffee_dt <- fread("../data/coffee_sim.csv")
+ggplot(coffee_dt, aes(coffee_cups_per_day, datavizitis_risk)) +
+  geom_boxplot() +
+  labs(x = "Cups of coffee per day", y = "Deaths per 1,000",
+       title = "Coffee Consumption vs Datavizitis Risk")
+```
+
+### 2. Investigating Third Variables
+
+```{r}
+# Smoking vs Datavizitis
+ggplot(coffee_dt, aes(packs_cigarettes_per_day, datavizitis_risk)) +
+  geom_boxplot() +
+  labs(x = "Packs of cigarettes per day", y = "Deaths per 1,000",
+       title = "Smoking vs Datavizitis Risk")
+
+# Combined effect
+ggplot(coffee_dt, aes(packs_cigarettes_per_day, datavizitis_risk, 
+                      fill = coffee_cups_per_day)) +
+  geom_boxplot() +
+  labs(x = "Packs of cigarettes per day", y = "Deaths per 1,000",
+       fill = "Coffee cups/day",
+       title = "Combined Effect of Smoking and Coffee")
+```
+
+### 3. Causal Diagram Interpretation
+
+Possible causal relationships:
+
+- Smoking → Coffee consumption (common cause)
+- Smoking → Datavizitis risk
+- Coffee consumption has no direct effect on datavizitis
+
+## Section 04: Visualization Guidelines
+
+### 1. Improved Visualization
+
+```{r}
+# Simulate data
+dt <- data.table(
+  pro_uptake = c(rnorm(3, 10100, 300), rnorm(4, 12100, 300),
+  rnorm(3, 9850, 300), rnorm(4, 11100, 300),
+  rnorm(4, 8300, 300), rnorm(3, 10050, 300),
+  rnorm(3, 12000, 300), rnorm(3, 10020, 300),
+  rnorm(3, 10080, 300), rnorm(3, 10070, 300)),
+  mutants = c(rep("WT", 3), rep("T494", 4), rep("K227N", 3), rep("A400V", 4),
+              rep("L421P", 4), rep("I500T", 3), rep("N591D", 3),
+              rep("A601T", 3), rep("E684D", 3), rep("G710R", 3))
+)
+
+# Calculate medians and sort
+dt[, median_per_mut := median(pro_uptake), by = mutants]
+wt_med <- unique(dt[mutants == "WT", median_per_mut])
+dt[, rel_to_wt := ifelse(median_per_mut < wt_med, "Smaller than WT", 
+                         ifelse(median_per_mut > wt_med, "Larger than WT", "WT"))]
+dt[, mutants := factor(mutants, levels = unique(dt[order(median_per_mut), mutants]))]
+
+# Create plot
+ggplot(dt, aes(mutants, pro_uptake, fill = rel_to_wt)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, size = 1.5, alpha = 0.7) +
+  geom_hline(yintercept = wt_med, linetype = "dashed", color = "red") +
+  labs(y = "Proline Uptake", x = "Mutants", 
+       title = "Proline Uptake by Mutant Type") +
+  scale_fill_manual(values = c("Larger than WT" = "#E69F00", 
+                               "Smaller than WT" = "#56B4E9", 
+                               "WT" = "#999999")) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        legend.position = "bottom") +
+  guides(fill = guide_legend(title = "Relative to WT"))
+```
+
+## Homework Exercises
+
+### Section 05: COVID-19 Fatality Rates
+
+#### 1. Load and Visualize Data
+
+```{r}
+fatality_dt <- fread('../data/belgium_infection_fatality_rate_june2020.csv')
+fatality_long <- melt(fatality_dt, id.vars = "age_group", 
+                      value.name = "fatality_rate", variable.name = "sex")
+
+# Plot
+ggplot(fatality_long, aes(age_group, fatality_rate, fill = sex)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = fatality_rate), 
+            position = position_dodge(width = 0.9), vjust = -0.25, size = 3) +
+  labs(x = "Age Group", y = "Fatality Rate (%)", 
+       title = "COVID-19 Fatality Rates by Age and Gender",
+       subtitle = "Belgium, June 2020") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+#### 2. Simpson's Paradox Explanation
+
+The apparent paradox occurs because:
+
+- Women live longer → more women in high-risk age groups
+- Men have higher fatality rates within each age group
+- When aggregated, women appear to have higher overall fatality
+
+Causal relationships:
+
+- Sex → Age distribution
+- Age → Fatality rate
+- Sex → Fatality rate (biological differences)
+
+## Section 06: Smoking and Datavizitis
+
+### 1. Load Data
+
+```{r}
+datavizitis_dt <- fread("../data/datavizitis_smoking.csv")
+```
+
+### 2. Hospitalized Individuals
+
+```{r}
+ggplot(datavizitis_dt[hospitalized == "Yes"], 
+       aes(cigarettes_per_day, datavizitis_severity)) +
+  geom_point(alpha = 0.3) +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Hospitalized Patients: Smoking vs Severity",
+       x = "Cigarettes per Day", y = "Datavizitis Severity")
+```
+
+### 3. All Individuals
+
+```{r}
+ggplot(datavizitis_dt, aes(cigarettes_per_day, datavizitis_severity)) +
+  geom_point(alpha = 0.1) +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(title = "All Individuals: Smoking vs Severity",
+       x = "Cigarettes per Day", y = "Datavizitis Severity")
+```
+
+### 4. Combined Visualization
+
+```{r}
+ggplot(datavizitis_dt, aes(cigarettes_per_day, datavizitis_severity, color = hospitalized)) +
+  geom_point(alpha = 0.2) +
+  geom_smooth(method = "lm") +
+  labs(title = "Smoking vs Severity by Hospitalization Status",
+       x = "Cigarettes per Day", y = "Datavizitis Severity") +
+  scale_color_manual(values = c("Yes" = "red", "No" = "blue"))
+```
+
+### 5. Causal Interpretation
+
+The negative association among hospitalized patients may be due to:
+
+- Hospitalization acts as a collider variable
+- Both severe symptoms and heavy smoking increase hospitalization likelihood
+- This creates a spurious negative correlation in the hospitalized subgroup
+
+Causal diagram:
+
+- Smoking → Hospitalization
+- Severity → Hospitalization
+- No direct causal link between smoking and severity
+
+## Section 07: Titanic Survival Analysis
+
+### 1. Load and Explore Data
+
+```{r}
+titanic <- fread("../data/titanic.csv")
+titanic[, survived := factor(survived, levels = c(0, 1), labels = c("Died", "Survived"))]
+titanic[, pclass := factor(pclass, labels = c("First", "Second", "Third"))]
+
+# Overall survival rate
+survival_rate <- titanic[, mean(survived == "Survived")]
+cat("Overall survival rate:", round(survival_rate * 100, 1), "%\n")
+```
+
+### 2. Age vs Survival
+
+```{r}
+ggplot(titanic, aes(survived, age)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(x = "Survival Outcome", y = "Age", 
+       title = "Age Distribution by Survival Status")
+```
+
+### 3. Passenger Class vs Survival
+
+```{r}
+ggplot(titanic, aes(pclass, fill = survived)) +
+  geom_bar(position = "fill") +
+  labs(x = "Passenger Class", y = "Proportion", 
+       title = "Survival Rate by Passenger Class",
+       fill = "Survival") +
+  scale_y_continuous(labels = scales::percent)
+```
+
+### 4. Age Distribution by Class
+
+```{r}
+ggplot(titanic, aes(pclass, age)) +
+  geom_boxplot(fill = "lightgreen") +
+  labs(x = "Passenger Class", y = "Age", 
+       title = "Age Distribution by Passenger Class")
+```
+
+### 5. Combined Analysis
+
+```{r}
+# Age vs Survival by Class
+p1 <- ggplot(titanic, aes(survived, age)) +
+  geom_boxplot(fill = "lightblue") +
+  facet_wrap(~pclass) +
+  labs(x = "Survival Outcome", y = "Age", 
+       title = "Age vs Survival by Passenger Class")
+
+# Survival counts by Class
+p2 <- ggplot(titanic, aes(pclass, fill = survived)) +
+  geom_bar(position = "dodge") +
+  labs(x = "Passenger Class", y = "Count", 
+       title = "Survival Counts by Passenger Class",
+       fill = "Survival")
+
+# Arrange plots
+plot_grid(p1, p2, ncol = 1, labels = "AUTO")
+```
+
+### 6. Causal Interpretation
+
+Key insights:
+
+- Higher classes had better survival rates (priority access to lifeboats)
+- Older passengers were overrepresented in higher classes
+- Within each class, younger passengers had better survival rates (rescue priority)
+
+Causal relationships:
+
+- Class → Survival (higher classes had better access to lifeboats)
+- Age → Survival (children were prioritized in rescue efforts)
+- Class ← Age (wealthier/older passengers in higher classes)
+
+This represents a combination of direct and indirect causal paths.
+
+## Conclusion
+
+This exercise demonstrated how to:
+
+- Identify and visualize third-variable effects
+- Recognize Simpson's paradox in aggregated data
+- Create effective visualizations to test hypotheses
+- Interpret causal diagrams from observational data

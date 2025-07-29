@@ -1,0 +1,233 @@
+---
+title: "08_statistical_testing_3"
+output: html_document
+date: "`r Sys.Date()`"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 8,
+  fig.height = 6,
+  cache = TRUE
+)
+library(ggplot2)
+library(data.table)
+library(magrittr)
+library(tidyr)
+library(dplyr)
+library(datasets)
+```
+
+# Tutorial Solutions
+
+## Section 01 - Choosing the Right Test
+
+```{r}
+# (a) Spearman correlation (quantitative, no distributional assumptions)
+# (b) Paired t-test (quantitative, normal distribution)
+# (c) Binomial test (H0: p=0.99, alternative="less")
+# (d) Fisher's exact test (binary-binary association, alternative="greater")
+```
+
+## Section 02 - Marker-Growth Association
+
+### Load Data
+
+```{r}
+gene <- fread("../data/eqtl/gene.txt")
+genotype <- fread("../data/eqtl/genotype.txt") %>% 
+  melt(id.vars = 'strain', variable.name = 'marker', value.name = 'genotype')
+growth <- fread("../data/eqtl/growth.txt") %>% 
+  melt(id.vars = "strain", variable.name = 'media', value.name = 'growth_rate')
+marker <- fread("../data/eqtl/marker.txt")
+```
+
+### Helper Functions
+
+```{r}
+getMaltoseDt <- function(mrk){
+  merge(growth[media == "YPMalt"], 
+        genotype[marker == mrk, .(strain, genotype)], 
+        by = 'strain')
+}
+
+plot_growth_one_mk <- function(mk){
+  ggplot(getMaltoseDt(mk), aes(genotype, growth_rate)) +
+    geom_boxplot() +
+    labs(title = mk) + 
+    theme_bw(base_size = 16) +
+    theme(plot.title = element_text(hjust = 0.5))
+}
+```
+
+### Marker 5211 Analysis
+
+```{r}
+#| fig-height: 4
+plot_growth_one_mk("mrk_5211")
+
+# Statistical tests
+m_dt <- getMaltoseDt('mrk_5211')
+t_test <- t.test(growth_rate ~ genotype, m_dt)
+wilcox_test <- wilcox.test(growth_rate ~ genotype, m_dt)
+
+cat("t-test p-value:", format.pval(t_test$p.value), "\n")
+cat("Wilcoxon p-value:", format.pval(wilcox_test$p.value))
+```
+
+### Test Function
+
+```{r}
+test_growth <- function(mk, test){
+  m_dt <- getMaltoseDt(mk)
+  if(test == 'wilcoxon') {
+    wilcox.test(growth_rate ~ genotype, m_dt)$p.value
+  } else {
+    t.test(growth_rate ~ genotype, m_dt)$p.value
+  }
+}
+
+# Marker 1653 (non-significant)
+test_growth('mrk_1653', 'wilcoxon')  # ~0.50
+test_growth('mrk_1653', 't')         # ~0.50
+
+# Marker 5091 (significant)
+test_growth('mrk_5091', 'wilcoxon')  # ~0.0008
+test_growth('mrk_5091', 't')         # ~0.0006
+```
+
+## Section 03 - Correlation Analysis
+
+### Full Iris Dataset
+
+```{r}
+#| fig-height: 5
+data(iris)
+cor_test_pearson <- cor.test(iris$Sepal.Length, iris$Sepal.Width, method = "pearson")
+
+ggplot(iris, aes(Sepal.Length, Sepal.Width)) +
+  geom_point() +
+  geom_smooth(method = lm) +
+  labs(title = paste("Pearson r =", round(cor_test_pearson$estimate, 3),
+                     "p =", format.pval(cor_test_pearson$p.value)))
+```
+
+### By Species
+
+```{r}
+#| fig-height: 6
+iris_dt <- as.data.table(iris)
+corr_dt <- iris_dt[, {
+  test <- cor.test(Sepal.Length, Sepal.Width, method = "pearson")
+  list(estimate = test$estimate, p.value = test$p.value)
+}, by = Species]
+
+ggplot(iris, aes(Sepal.Length, Sepal.Width, color = Species)) +
+  geom_point() +
+  geom_smooth(method = lm) +
+  geom_text(data = corr_dt, aes(x = 6.5, y = 4.2, 
+                                label = paste("r =", round(estimate, 2))), 
+            color = "black") +
+  facet_wrap(~Species) +
+  theme_bw(base_size = 12)
+```
+
+## Section 04 - Normality Assumption Pitfalls
+
+```{r}
+#| fig-height: 10
+dt <- fread("../data/stats-pitfalls.csv")
+
+# Visualization
+p1 <- ggplot(melt(dt), aes(variable, value)) + 
+  geom_boxplot() +
+  stat_summary(fun = mean, geom = "point", color = "red", size = 3) +
+  labs(title = "Boxplots with Mean (red dot)")
+
+p2 <- ggplot(melt(dt), aes(value)) + 
+  geom_histogram(bins = 20) +
+  facet_wrap(~variable, scales = "free") +
+  geom_vline(aes(xintercept = mean(value)), color = "red") +
+  labs(title = "Histograms with Mean (red line)")
+
+gridExtra::grid.arrange(p1, p2, ncol = 1)
+
+# Statistical tests
+cat("Wilcoxon p-value:", wilcox.test(dt$group1, dt$group2)$p.value, "\n")
+cat("t-test p-value:", t.test(dt$group1, dt$group2)$p.value)
+```
+
+## Section 05 - Correlation Test
+
+```{r}
+ex_dt <- fread("../data/exam_correlation.csv")
+
+# Correlations
+pearson_cor <- cor.test(ex_dt$attendance, ex_dt$achieved_points, method = "pearson")
+spearman_cor <- cor.test(ex_dt$attendance, ex_dt$achieved_points, method = "spearman")
+
+# Visualization
+ggplot(ex_dt, aes(attendance, achieved_points)) +
+  geom_point() +
+  geom_smooth(method = lm) +
+  labs(title = paste("Pearson r =", round(pearson_cor$estimate, 3), 
+                    "| Spearman ρ =", round(spearman_cor$estimate, 3)),
+       subtitle = "Spearman preferred due to outliers (0 scores)")
+```
+
+## Section 06 - Association Tests
+
+```{r}
+# Mtcars analysis
+cars <- as.data.table(mtcars)
+cars[, cyl_4 := cyl > 4]
+cars[, gear_3 := gear > 3]
+cont_tbl <- table(cars$cyl_4, cars$gear_3)
+
+# Two-sided Fisher test
+signif(fisher.test(cont_tbl)$p.value, 2)  # 0.0028
+
+# Interpretation: Significant association between high cylinders and gears
+```
+
+## Genetic Linkage Analysis
+
+```{r}
+# Marker association function
+marker_test <- function(marker1, marker2){
+  mks_geno <- genotype[marker %in% c(marker1, marker2)] %>%
+    dcast(strain ~ marker, value.var = "genotype")
+  fisher.test(table(mks_geno[[2]], mks_geno[[3]]))$p.value
+}
+
+# Test all markers against mrk_1
+other_markers <- marker[id != "mrk_1"]
+other_markers[, pval := sapply(id, marker_test, "mrk_1")]
+other_markers[, on_chr_1 := chrom == "chr01"]
+
+# Visualization
+ggplot(other_markers, aes(start, -log10(pval))) +
+  geom_point() +
+  facet_wrap(~chrom, scales = "free_x", nrow = 2) +
+  labs(x = "Genomic Position", y = "-log10(P-value)")
+
+# P-value distribution by chromosome
+ggplot(other_markers, aes(pval)) +
+  geom_histogram(bins = 20) +
+  facet_wrap(~on_chr_1, labeller = label_both) +
+  labs(title = "P-value Distribution by Chromosome Group")
+
+cat("Chr1 significant fraction:",
+    mean(other_markers[on_chr_1 == TRUE]$pval < 0.05), "\n")
+cat("Other chromosomes significant fraction:",
+    mean(other_markers[on_chr_1 == FALSE]$pval < 0.05))
+```
+
+### Key Observations
+
+- Markers on chr01 show strong distance-dependent association with mrk_1
+- Non-chr01 markers show baseline ~5% significant rate (false positives)
+- Demonstrates genetic linkage on same chromosome
